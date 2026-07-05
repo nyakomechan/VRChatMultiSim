@@ -1,0 +1,19 @@
+{
+    "name": "VRChat.MultiSim",
+    "rootNamespace": "MultiSim",
+    "references": [
+        "VRC.ClientSim",
+        "VRC.Udon",
+        "VRC.SDKBase",
+        "ParrelSync"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

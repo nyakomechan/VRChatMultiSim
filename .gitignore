@@ -1,0 +1,12 @@
+# VRChatMultiSim distribution repo:
+# only the MultiSim tool and its samples are tracked
+# (the rest of the Unity project, including the VRChat SDK, is excluded).
+/*
+!/.gitignore
+!/README.md
+!/Assets/
+/Assets/*
+!/Assets/MultiSim/
+!/Assets/MultiSim.meta
+!/Assets/MultiSimSamples/
+!/Assets/MultiSimSamples.meta
