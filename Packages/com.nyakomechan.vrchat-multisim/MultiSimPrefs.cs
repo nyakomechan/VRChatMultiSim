@@ -14,7 +14,7 @@ namespace MultiSim
         private const string PortKey = "MultiSim.Port";
         private const string VerboseKey = "MultiSim.Verbose";
 
-        public const int ProtocolVersion = 1;
+        public const int ProtocolVersion = 2;
 
         public static bool Enabled
         {

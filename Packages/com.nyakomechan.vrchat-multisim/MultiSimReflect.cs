@@ -64,6 +64,9 @@ namespace MultiSim
         // ClientSimNetworkIdHolder
         private static FieldInfo _encodeDecodersField;
 
+        // ClientSimStationHelper
+        private static FieldInfo _stationUsingPlayerField;
+
         private static bool _initialized;
 
         public static void InitializeOrThrow()
@@ -122,6 +125,9 @@ namespace MultiSim
                 typeof(UdonBehaviour).GetField("_program", AnyInstance), "UdonBehaviour._program");
             _encodeDecodersField = Require(
                 typeof(ClientSimNetworkIdHolder).GetField("encodeDecoders", AnyStatic), "ClientSimNetworkIdHolder.encodeDecoders");
+
+            // Optional: only used to mark stations as occupied by remote players.
+            _stationUsingPlayerField = typeof(ClientSimStationHelper).GetField("_usingPlayer", AnyInstance);
 
             _initialized = true;
         }
@@ -328,6 +334,35 @@ namespace MultiSim
             decoders.TryGetValue(componentType.FullName, out var previous);
             decoders[componentType.FullName] = replacement;
             return previous;
+        }
+
+        #endregion
+
+        #region Stations
+
+        /// <summary>
+        /// Marks a station as occupied (or free when player is null) so ClientSim's
+        /// occupancy checks (IsOccupied/GetCurrentSittingPlayer) see remote sitters.
+        /// The helper's own EnterStation rejects non-local players, hence reflection.
+        /// </summary>
+        public static void SetStationOccupant(GameObject stationObject, VRCPlayerApi player)
+        {
+            if (_stationUsingPlayerField == null || stationObject == null ||
+                !stationObject.TryGetComponent(out ClientSimStationHelper helper))
+            {
+                return;
+            }
+            _stationUsingPlayerField.SetValue(helper, player);
+        }
+
+        public static VRCPlayerApi GetStationOccupant(GameObject stationObject)
+        {
+            if (_stationUsingPlayerField == null || stationObject == null ||
+                !stationObject.TryGetComponent(out ClientSimStationHelper helper))
+            {
+                return null;
+            }
+            return (VRCPlayerApi)_stationUsingPlayerField.GetValue(helper);
         }
 
         #endregion

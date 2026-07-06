@@ -61,6 +61,19 @@ namespace MultiSim
         private readonly List<UdonBehaviour> _manualSerializationQueue = new List<UdonBehaviour>();
         private bool _applyingRemoteOwner;
 
+        // Station seats by player id. The local player's seat is tracked too (for host
+        // snapshots); pinning and Udon events only apply to remote players.
+        private class SeatInfo
+        {
+            public int PlayerId;
+            public int NetworkId;
+            public GameObject StationObject;
+            public VRC.SDK3.Components.VRCStation Station;
+        }
+        private readonly Dictionary<int, SeatInfo> _seatsByPlayer = new Dictionary<int, SeatInfo>();
+        private IClientSimEventDispatcher _dispatcher;
+        private bool _localSeated;
+
         private Delegate _sendEventHandler;
         private bool _hooksInstalled;
         private IClientSimEncodeDecoder _originalUdonCodec;
@@ -206,6 +219,11 @@ namespace MultiSim
 
             InstallHooks();
 
+            // Station enter/exit for the LOCAL player is reported through ClientSim's dispatcher.
+            _dispatcher = MultiSimReflect.GetEventDispatcher(_main);
+            _dispatcher.Subscribe<ClientSimOnPlayerEnteredStationEvent>(OnLocalPlayerEnteredStation);
+            _dispatcher.Subscribe<ClientSimOnPlayerExitedStationEvent>(OnLocalPlayerExitedStation);
+
             _transport = new MultiSimTransport();
             if (_isHost)
             {
@@ -237,6 +255,19 @@ namespace MultiSim
             }
 
             RemoveHooks();
+            if (_dispatcher != null)
+            {
+                try
+                {
+                    _dispatcher.Unsubscribe<ClientSimOnPlayerEnteredStationEvent>(OnLocalPlayerEnteredStation);
+                    _dispatcher.Unsubscribe<ClientSimOnPlayerExitedStationEvent>(OnLocalPlayerExitedStation);
+                }
+                catch (Exception)
+                {
+                    // Dispatcher may already be disposed during teardown.
+                }
+                _dispatcher = null;
+            }
             if (_udonCodecSwapped && _originalUdonCodec != null)
             {
                 MultiSimReflect.SwapEncodeDecoder(typeof(UdonBehaviour), _originalUdonCodec);
@@ -366,7 +397,14 @@ namespace MultiSim
 
         private void LateUpdate()
         {
-            if (!_ready || _manualSerializationQueue.Count == 0)
+            if (!_ready)
+            {
+                return;
+            }
+
+            PinSeatedRemotePlayers();
+
+            if (_manualSerializationQueue.Count == 0)
             {
                 return;
             }
@@ -528,6 +566,12 @@ namespace MultiSim
                 case "pos":
                     HandlePlayerPosition(senderId, payload);
                     break;
+                case "sit":
+                    ApplySeat(senderId, (int)payload["nid"].Double, fireEvents: true);
+                    break;
+                case "unsit":
+                    ApplyUnseat(senderId, fireEvents: true, warpToExit: true);
+                    break;
                 default:
                     MultiSimLog.Verbose($"Ignoring unknown message type '{type}'.");
                     break;
@@ -641,6 +685,17 @@ namespace MultiSim
             }
 
             snapshot["objs"] = objects;
+
+            DataList seats = new DataList();
+            foreach (SeatInfo seat in _seatsByPlayer.Values)
+            {
+                DataDictionary entry = new DataDictionary();
+                entry["nid"] = seat.NetworkId;
+                entry["pid"] = seat.PlayerId;
+                seats.Add(entry);
+            }
+            snapshot["seats"] = seats;
+
             return snapshot;
         }
 
@@ -761,6 +816,7 @@ namespace MultiSim
                 return;
             }
 
+            ApplyUnseat(playerId, fireEvents: true, warpToExit: false);
             _joinOrder.Remove(playerId);
             ClientSimMain.RemovePlayer(api);
         }
@@ -782,6 +838,7 @@ namespace MultiSim
             remotes.Sort((a, b) => (a == master ? 1 : 0).CompareTo(b == master ? 1 : 0));
             foreach (VRCPlayerApi api in remotes)
             {
+                ApplyUnseat(api.playerId, fireEvents: true, warpToExit: false);
                 _joinOrder.Remove(api.playerId);
                 ClientSimMain.RemovePlayer(api);
             }
@@ -899,6 +956,17 @@ namespace MultiSim
 
         private void HandleSnapshot(DataDictionary payload)
         {
+            if (payload.TryGetValue("seats", out DataToken seatsToken) &&
+                seatsToken.TokenType == TokenType.DataList)
+            {
+                DataList seats = seatsToken.DataList;
+                for (int i = 0; i < seats.Count; i++)
+                {
+                    DataDictionary entry = seats[i].DataDictionary;
+                    ApplySeat((int)entry["pid"].Double, (int)entry["nid"].Double, fireEvents: true);
+                }
+            }
+
             if (!payload.TryGetValue("objs", out DataToken objectsToken) ||
                 objectsToken.TokenType != TokenType.DataList)
             {
@@ -974,6 +1042,12 @@ namespace MultiSim
 
         private void SendLocalPlayerPosition()
         {
+            // While seated, remotes derive our position from the station itself.
+            if (_localSeated)
+            {
+                return;
+            }
+
             VRCPlayerApi local = _playerManager.LocalPlayer();
             if (local == null)
             {
@@ -999,6 +1073,12 @@ namespace MultiSim
 
         private void HandlePlayerPosition(int senderId, DataDictionary payload)
         {
+            // Seated players are pinned to their station instead.
+            if (_seatsByPlayer.ContainsKey(senderId))
+            {
+                return;
+            }
+
             VRCPlayerApi api = _playerManager.GetPlayerByID(senderId);
             if (api == null || api.isLocal || api.gameObject == null)
             {
@@ -1008,6 +1088,205 @@ namespace MultiSim
             api.gameObject.transform.SetPositionAndRotation(
                 payload["pos"].GetVector3(),
                 payload["rot"].GetQuaternion());
+        }
+
+        #endregion
+
+        #region Stations
+
+        private void OnLocalPlayerEnteredStation(ClientSimOnPlayerEnteredStationEvent enterEvent)
+        {
+            GameObject stationObject = enterEvent?.station?.GetStationGameObject();
+            if (stationObject == null)
+            {
+                return;
+            }
+
+            _localSeated = true;
+
+            if (!_registry.TryGetNetworkId(stationObject, out int networkId))
+            {
+                if (_sessionActive)
+                {
+                    MultiSimLog.Warn($"Station '{stationObject.name}' has no network id; the seat will not be synced. " +
+                                     "Put the VRCStation on a GameObject with a networked component (e.g. an UdonBehaviour).");
+                }
+                return;
+            }
+
+            _seatsByPlayer[_localPlayerId] = new SeatInfo
+            {
+                PlayerId = _localPlayerId,
+                NetworkId = networkId,
+                StationObject = stationObject,
+                Station = stationObject.GetComponent<VRC.SDK3.Components.VRCStation>(),
+            };
+
+            if (!_ready || !_sessionActive)
+            {
+                return;
+            }
+
+            DataDictionary payload = new DataDictionary();
+            payload["nid"] = networkId;
+            SendEnvelope("sit", payload);
+        }
+
+        private void OnLocalPlayerExitedStation(ClientSimOnPlayerExitedStationEvent exitEvent)
+        {
+            _localSeated = false;
+
+            if (!_seatsByPlayer.TryGetValue(_localPlayerId, out SeatInfo seat))
+            {
+                return;
+            }
+            _seatsByPlayer.Remove(_localPlayerId);
+
+            // Resume position sync immediately so remotes see the exit spot.
+            _lastSentPosition = new Vector3(float.MaxValue, 0f, 0f);
+            _nextPlayerPosSend = 0f;
+
+            if (!_ready || !_sessionActive)
+            {
+                return;
+            }
+
+            DataDictionary payload = new DataDictionary();
+            payload["nid"] = seat.NetworkId;
+            SendEnvelope("unsit", payload);
+        }
+
+        private void ApplySeat(int playerId, int networkId, bool fireEvents)
+        {
+            if (playerId == _localPlayerId || playerId < 0)
+            {
+                return;
+            }
+
+            // A player can only occupy one station at a time.
+            ApplyUnseat(playerId, fireEvents: true, warpToExit: false);
+
+            if (!_registry.TryGetGameObject(networkId, out GameObject stationObject))
+            {
+                MultiSimLog.Verbose($"Seat for unknown network id {networkId}.");
+                return;
+            }
+
+            var station = stationObject.GetComponent<VRC.SDK3.Components.VRCStation>();
+            if (station == null)
+            {
+                MultiSimLog.Warn($"Seat message for '{stationObject.name}', which has no VRCStation.");
+                return;
+            }
+
+            SeatInfo seat = new SeatInfo
+            {
+                PlayerId = playerId,
+                NetworkId = networkId,
+                StationObject = stationObject,
+                Station = station,
+            };
+            _seatsByPlayer[playerId] = seat;
+
+            VRCPlayerApi player = _playerManager.GetPlayerByID(playerId);
+            MultiSimReflect.SetStationOccupant(stationObject, player);
+            PinSeat(seat, player);
+
+            if (fireEvents)
+            {
+                RunStationUdonEvents(seat, player, entered: true);
+            }
+        }
+
+        private void ApplyUnseat(int playerId, bool fireEvents, bool warpToExit)
+        {
+            if (!_seatsByPlayer.TryGetValue(playerId, out SeatInfo seat) || playerId == _localPlayerId)
+            {
+                return;
+            }
+            _seatsByPlayer.Remove(playerId);
+
+            VRCPlayerApi player = _playerManager.GetPlayerByID(playerId);
+
+            if (seat.StationObject != null)
+            {
+                VRCPlayerApi occupant = MultiSimReflect.GetStationOccupant(seat.StationObject);
+                if (occupant == null || occupant == player || occupant.playerId == playerId)
+                {
+                    MultiSimReflect.SetStationOccupant(seat.StationObject, null);
+                }
+            }
+
+            if (warpToExit && player != null && !player.isLocal && player.gameObject != null &&
+                seat.Station != null && seat.Station.stationExitPlayerLocation != null)
+            {
+                Transform exit = seat.Station.stationExitPlayerLocation;
+                player.gameObject.transform.SetPositionAndRotation(exit.position, exit.rotation);
+            }
+
+            if (fireEvents)
+            {
+                RunStationUdonEvents(seat, player, entered: false);
+            }
+        }
+
+        /// <summary>
+        /// Fires the station's Udon events for a remote player, using the same event-name
+        /// fields the real client uses (UdonSharp sets them to _onStationEntered/_onStationExited).
+        /// </summary>
+        private void RunStationUdonEvents(SeatInfo seat, VRCPlayerApi player, bool entered)
+        {
+            if (seat.StationObject == null)
+            {
+                return;
+            }
+
+            string eventName = entered
+                ? seat.Station != null ? seat.Station.OnRemotePlayerEnterStation : null
+                : seat.Station != null ? seat.Station.OnRemotePlayerExitStation : null;
+            if (string.IsNullOrEmpty(eventName))
+            {
+                eventName = entered ? "_onStationEntered" : "_onStationExited";
+            }
+
+            foreach (UdonBehaviour behaviour in seat.StationObject.GetComponents<UdonBehaviour>())
+            {
+                try
+                {
+                    // Parameter name gets mangled to the Udon convention, matching
+                    // ClientSimUdonHelper's local-player station events.
+                    behaviour.RunEvent(eventName, ("Player", player));
+                }
+                catch (Exception e)
+                {
+                    MultiSimLog.Error($"Error running station event '{eventName}' on '{behaviour.name}': {e}");
+                }
+            }
+        }
+
+        /// <summary>Keeps seated remote players glued to their station (stations can move).</summary>
+        private void PinSeatedRemotePlayers()
+        {
+            foreach (SeatInfo seat in _seatsByPlayer.Values)
+            {
+                if (seat.PlayerId == _localPlayerId)
+                {
+                    continue;
+                }
+                PinSeat(seat, _playerManager.GetPlayerByID(seat.PlayerId));
+            }
+        }
+
+        private static void PinSeat(SeatInfo seat, VRCPlayerApi player)
+        {
+            if (player == null || player.isLocal || player.gameObject == null ||
+                seat.Station == null || seat.Station.stationEnterPlayerLocation == null)
+            {
+                return;
+            }
+
+            Transform enter = seat.Station.stationEnterPlayerLocation;
+            player.gameObject.transform.SetPositionAndRotation(enter.position, enter.rotation);
         }
 
         #endregion

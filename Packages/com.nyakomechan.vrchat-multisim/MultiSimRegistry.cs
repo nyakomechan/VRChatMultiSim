@@ -18,11 +18,16 @@ namespace MultiSim
         private readonly Dictionary<int, ClientSimNetworkIdHolder> _holders =
             new Dictionary<int, ClientSimNetworkIdHolder>();
 
+        // Every networked GameObject by id, including ones without syncable data
+        // (e.g. a station whose GameObject has no synced variables).
+        private readonly Dictionary<int, GameObject> _objects = new Dictionary<int, GameObject>();
+
         public IReadOnlyDictionary<int, ClientSimNetworkIdHolder> Holders => _holders;
 
         public void BuildFromScene()
         {
             _holders.Clear();
+            _objects.Clear();
 
             VRC_SceneDescriptor descriptor = VRC_SceneDescriptor.Instance;
             if (descriptor == null)
@@ -49,6 +54,8 @@ namespace MultiSim
                 {
                     continue;
                 }
+
+                _objects[networkId] = view.gameObject;
 
                 if (!view.TryGetComponent(out ClientSimNetworkIdHolder holder))
                 {
@@ -83,6 +90,16 @@ namespace MultiSim
                 return true;
             }
             holder = null;
+            return false;
+        }
+
+        public bool TryGetGameObject(int networkId, out GameObject obj)
+        {
+            if (_objects.TryGetValue(networkId, out obj) && obj != null)
+            {
+                return true;
+            }
+            obj = null;
             return false;
         }
 

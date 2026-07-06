@@ -1,7 +1,7 @@
 {
   "name": "com.nyakomechan.vrchat-multisim",
   "displayName": "VRChat MultiSim",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "unity": "2022.3",
   "description": "In-editor multiplayer simulation for VRChat worlds. Connects ParrelSync-cloned Unity editors over localhost TCP and drives ClientSim's serialization pipeline, so synced variables, network events, ownership and player join/leave can be tested without building. Editor-only; never included in world uploads.",
   "author": {
