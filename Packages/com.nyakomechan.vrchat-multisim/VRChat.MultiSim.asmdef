@@ -14,6 +14,12 @@
     "precompiledReferences": [],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.veriorpies.parrelsync",
+            "expression": "",
+            "define": "MULTISIM_PARRELSYNC"
+        }
+    ],
     "noEngineReferences": false
 }

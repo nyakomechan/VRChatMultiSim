@@ -7,6 +7,12 @@
 - **開発プロジェクト**: `F:/Unity_projects_2019/test26c`(オリジナル=ホスト)
 - **クローン**: `F:/Unity_projects_2019/test26c_clone_0`(ParrelSyncで作成済み。AssetsはJunction共有なのでコード修正は自動で両方に反映される)
 - **検証状況**: 2026-07-06 に2エディタ実機テスト済み。参加/退出、同期変数(Manual)、引数付きネットワークイベント、Ownership移譲、プレイヤー位置同期、レイトジョインスナップショットの全経路が動作確認済み。エラー0。
+- **パッケージ化**: `Packages/com.nyakomechan.vrchat-multisim/` の埋め込みVPM/UPMパッケージ
+  (`package.json` あり、UPM git URL `?path=/Packages/com.nyakomechan.vrchat-multisim` で導入可)。
+  ParrelSyncはVPM依存にできないため、asmdefの `versionDefines`(`MULTISIM_PARRELSYNC`)+
+  `MultiSimPrefs.IsCloneInstance()/CloneArgument()` のガードで**オプション依存**にしてある
+  (未導入時はコンパイルが通り、常にホストとして動作)。
+  ※ パッケージ移設後の2エディタ再検証は未実施(移設はファイル移動+ParrelSyncガードのみ)。
 
 ---
 
@@ -79,10 +85,11 @@ ReadySequence() = ClientSimMain.InitializeClientSim の後半を忠実に再現:
 | `MultiSimPrefs.cs` | EditorPrefs設定(`MultiSim.Enabled` / `MultiSim.Port`=24685 / `MultiSim.Verbose`)。**EditorPrefsはクローンと共有される**(意図的) |
 | `MultiSimMenu.cs` | Tools/VRChat MultiSim メニュー |
 | `MultiSimLog.cs` | `[MultiSim]` プレフィックスログ。Verbose は Prefs でゲート |
-| `../MultiSimSamples/MultiSimTestBoard.cs` | 検証用U#ギミック(Manual sync + [NetworkCallable]イベント)。**asmdef外**(U#はAssembly-CSharp必須) |
+| `Samples~/MultiSimTestBoard/MultiSimTestBoard.cs` | 検証用U#ギミック(Manual sync + [NetworkCallable]イベント)。Samples経由でAssetsへImportして使う(U#はAssembly-CSharp必須のため**パッケージ内では動かない**)。開発プロジェクトには untracked コピーが `Assets/MultiSimSamples/` にあり、テストシーンはそれを参照 |
 
 asmdef `VRChat.MultiSim`: **全プラットフォーム**(includePlatforms空)+ 全ファイル `#if UNITY_EDITOR` 囲い。
-references: VRC.ClientSim / VRC.Udon / VRC.SDKBase / ParrelSync。
+references: VRC.ClientSim / VRC.Udon / VRC.SDKBase / ParrelSync(欠落時は無視される)。
+versionDefines で ParrelSync 導入時のみ `MULTISIM_PARRELSYNC` が定義される。
 
 ---
 

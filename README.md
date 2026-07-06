@@ -24,6 +24,25 @@
 | ボイス、アバター、Station 着席の同期、PlayerData/Persistence | ❌ 未対応 |
 | `VRCInstantiate` した動的オブジェクトの同期 | ❌(VRChat 本番同様、ObjectPool を使ってください) |
 
+## インストール
+
+VPM パッケージ(`com.nyakomechan.vrchat-multisim`)として配布しています。
+
+- **Unity Package Manager(git URL)で追加する場合**:
+  `Window → Package Manager → + → Add package from git URL...` に以下を入力
+
+  ```
+  https://github.com/nyakomechan/VRChatMultiSim.git?path=/Packages/com.nyakomechan.vrchat-multisim
+  ```
+
+- **手動で追加する場合**: このリポジトリの `Packages/com.nyakomechan.vrchat-multisim/` フォルダを、
+  ワールドプロジェクトの `Packages/` 直下にコピー(埋め込みパッケージ)
+
+前提パッケージ:
+- `com.vrchat.worlds` **3.10.x**(VCC ワールドプロジェクト)
+- [ParrelSync](https://github.com/VeriorPies/ParrelSync)(git URL: `https://github.com/VeriorPies/ParrelSync.git?path=/ParrelSync`)
+  — 未導入でもコンパイルは通りますが、ホスト専用になります(クローン=クライアントの判別に必要)
+
 ## 使い方
 
 1. **メニュー → Tools → VRChat MultiSim → Enable Multiplayer Simulation** をオンにする
@@ -39,7 +58,8 @@
 
 ## 動作確認用サンプル
 
-`Assets/MultiSimSamples/MultiSimTestBoard.cs`(UdonSharp・Manual Sync)をシーンの Cube 等に付けると:
+Package Manager でこのパッケージを選択し、**Samples タブ → "MultiSim Test Board" → Import** すると
+`MultiSimTestBoard.cs`(UdonSharp・Manual Sync)が Assets 配下に取り込まれます。シーンの Cube 等に付けると:
 
 - クリック(Interact)→ Ownership 取得 + 同期変数インクリメント + `RequestSerialization` + 全員へネットワークイベント送信
 - 各エディタの Console で `OnDeserialization` / NetworkEvent の受信を確認できます
@@ -57,16 +77,18 @@
 ## ファイル構成
 
 ```
-Assets/MultiSim/
+Packages/com.nyakomechan.vrchat-multisim/
+  package.json          VPM/UPM パッケージ定義
   MultiSimCore.cs       起動制御・ハンドシェイク・ID再割当・Ready制御・同期ループ
   MultiSimTransport.cs  localhost TCP(長さプレフィックス付き JSON)
   MultiSimRegistry.cs   NetworkID → ClientSimNetworkIdHolder のマップ構築
   MultiSimReflect.cs    ClientSim 内部へのリフレクション橋渡し(SDK 3.10.x 固定)
+  MultiSimUdonCodec.cs  UdonBehaviour 用 Encode/Decode(ClientSim のバグ回避)
   MultiSimJson.cs       VRCJson ベースのメッセージ/イベント引数シリアライズ
-  MultiSimPrefs.cs      設定(EditorPrefs)
+  MultiSimPrefs.cs      設定(EditorPrefs)+ ParrelSync 判別ヘルパー
   MultiSimMenu.cs       Tools メニュー
-Assets/MultiSimSamples/
-  MultiSimTestBoard.cs  動作確認用 UdonSharp ギミック
+  Samples~/MultiSimTestBoard/
+    MultiSimTestBoard.cs  動作確認用 UdonSharp ギミック(Samples から Import)
 ```
 
 すべて `#if UNITY_EDITOR` で囲まれており、ワールドのビルド/アップロードには一切含まれません。

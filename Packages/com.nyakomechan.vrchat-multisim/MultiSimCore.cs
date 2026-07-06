@@ -3,7 +3,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
-using ParrelSync;
 using UnityEditor;
 using UnityEngine;
 using VRC.SDK3.ClientSim;
@@ -123,9 +122,9 @@ namespace MultiSim
 
             if (string.IsNullOrEmpty(settings.customLocalPlayerName))
             {
-                if (ClonesManager.IsClone())
+                if (MultiSimPrefs.IsCloneInstance())
                 {
-                    string arg = ClonesManager.GetArgument();
+                    string arg = MultiSimPrefs.CloneArgument();
                     settings.customLocalPlayerName = "Player-" + (string.IsNullOrEmpty(arg) ? "Clone" : arg);
                 }
                 else
@@ -198,7 +197,7 @@ namespace MultiSim
 
             _main = MultiSimReflect.GetMainInstance();
             _playerManager = MultiSimReflect.GetPlayerManager(_main);
-            _isHost = !ClonesManager.IsClone();
+            _isHost = !MultiSimPrefs.IsCloneInstance();
             _localPlayerName = _forcedSettings != null ? _forcedSettings.customLocalPlayerName : "Player";
 
             // ClientSim's own UdonBehaviour codec corrupts UdonSharp heap slots (see MultiSimUdonCodec).

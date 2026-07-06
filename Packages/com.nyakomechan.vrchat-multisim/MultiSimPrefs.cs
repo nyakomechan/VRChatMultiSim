@@ -42,6 +42,39 @@ namespace MultiSim
 
         /// <summary>Interval for local player position broadcasts.</summary>
         public const float PlayerPosInterval = 0.1f;
+
+        /// <summary>Whether ParrelSync is installed (driven by asmdef versionDefines).</summary>
+        public static bool HasParrelSync
+        {
+            get
+            {
+#if MULTISIM_PARRELSYNC
+                return true;
+#else
+                return false;
+#endif
+            }
+        }
+
+        /// <summary>True when this editor is a ParrelSync clone (= joins as a client).</summary>
+        public static bool IsCloneInstance()
+        {
+#if MULTISIM_PARRELSYNC
+            return ParrelSync.ClonesManager.IsClone();
+#else
+            return false;
+#endif
+        }
+
+        /// <summary>The ParrelSync clone argument, used for the default player name.</summary>
+        public static string CloneArgument()
+        {
+#if MULTISIM_PARRELSYNC
+            return ParrelSync.ClonesManager.GetArgument();
+#else
+            return "";
+#endif
+        }
     }
 }
 #endif

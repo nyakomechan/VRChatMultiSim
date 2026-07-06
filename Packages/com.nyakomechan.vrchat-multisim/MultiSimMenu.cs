@@ -1,5 +1,4 @@
 #if UNITY_EDITOR
-using ParrelSync;
 using UnityEditor;
 using UnityEngine;
 
@@ -16,6 +15,11 @@ namespace MultiSim
             MultiSimPrefs.Enabled = !MultiSimPrefs.Enabled;
             MultiSimLog.Info($"Multiplayer simulation {(MultiSimPrefs.Enabled ? "enabled" : "disabled")}. " +
                              "This setting is shared with ParrelSync clones (EditorPrefs).");
+            if (MultiSimPrefs.Enabled && !MultiSimPrefs.HasParrelSync)
+            {
+                MultiSimLog.Warn("ParrelSync is not installed. This editor can only act as the host; " +
+                                 "install ParrelSync (https://github.com/VeriorPies/ParrelSync) to run clone clients.");
+            }
         }
 
         [MenuItem(EnabledMenu, true)]
@@ -41,15 +45,25 @@ namespace MultiSim
         [MenuItem("Tools/VRChat MultiSim/Open ParrelSync Clones Manager", false, 20)]
         private static void OpenClonesManager()
         {
+            if (!MultiSimPrefs.HasParrelSync)
+            {
+                MultiSimLog.Warn("ParrelSync is not installed: https://github.com/VeriorPies/ParrelSync");
+                return;
+            }
             EditorApplication.ExecuteMenuItem("ParrelSync/Clones Manager");
         }
 
         [MenuItem("Tools/VRChat MultiSim/Show Current Role", false, 21)]
         private static void ShowRole()
         {
-            bool isClone = ClonesManager.IsClone();
-            MultiSimLog.Info(isClone
-                ? $"This editor is a ParrelSync CLONE, so it will join as a CLIENT (argument: '{ClonesManager.GetArgument()}')."
+            if (!MultiSimPrefs.HasParrelSync)
+            {
+                MultiSimLog.Info("ParrelSync is not installed, so this editor always acts as the HOST.");
+                return;
+            }
+
+            MultiSimLog.Info(MultiSimPrefs.IsCloneInstance()
+                ? $"This editor is a ParrelSync CLONE, so it will join as a CLIENT (argument: '{MultiSimPrefs.CloneArgument()}')."
                 : "This editor is the ORIGINAL project, so it will act as the HOST.");
         }
     }
