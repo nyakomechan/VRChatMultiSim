@@ -126,6 +126,14 @@ namespace MultiSim
                 heap.SetHeapVariable(address, value, declaredType);
             }
 
+            if (!udonBehaviour.HasDoneStart)
+            {
+                MultiSimLog.Warn($"Skipping OnDeserialization for '{udonBehaviour.gameObject.name}' " +
+                                 $"(HasDoneStart=false). Data was written to the heap but the event will " +
+                                 $"not fire until the next sync.");
+                return;
+            }
+
             udonBehaviour.OnDeserialization(new DeserializationResult(0, 0, true));
         }
 

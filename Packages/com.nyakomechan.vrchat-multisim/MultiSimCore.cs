@@ -59,6 +59,7 @@ namespace MultiSim
         private bool _welcomeReceived;
 
         private readonly List<UdonBehaviour> _manualSerializationQueue = new List<UdonBehaviour>();
+        private readonly List<UdonBehaviour> _manualSerializationProcessing = new List<UdonBehaviour>();
         private bool _applyingRemoteOwner;
 
         // Station seats by player id. The local player's seat is tracked too (for host
@@ -404,12 +405,19 @@ namespace MultiSim
 
             PinSeatedRemotePlayers();
 
+            // Snapshot the queue into a separate list and clear it before processing,
+            // so that re-entrant RequestSerialization calls during PostEncode
+            // (e.g. QvPen's batched late-sync) are added to the fresh queue and
+            // processed on the next frame — matching VRChat's one-batch-per-tick model.
             if (_manualSerializationQueue.Count == 0)
             {
                 return;
             }
 
-            foreach (UdonBehaviour udonBehaviour in _manualSerializationQueue)
+            _manualSerializationProcessing.AddRange(_manualSerializationQueue);
+            _manualSerializationQueue.Clear();
+
+            foreach (UdonBehaviour udonBehaviour in _manualSerializationProcessing)
             {
                 if (udonBehaviour == null)
                 {
@@ -417,7 +425,7 @@ namespace MultiSim
                 }
                 SendManualSerialization(udonBehaviour);
             }
-            _manualSerializationQueue.Clear();
+            _manualSerializationProcessing.Clear();
         }
 
         #endregion
@@ -755,6 +763,12 @@ namespace MultiSim
         private IEnumerator ClientReadySequence()
         {
             yield return StartCoroutine(ReadySequence());
+
+            // OnClientSimReady yields one frame for ManagedUpdate to run _start on
+            // UdonBehaviours. Yield another frame to cover late-registered behaviours
+            // (e.g. objects activated during _start) so HasDoneStart is true before
+            // we fire OnDeserialization via the snapshot.
+            yield return null;
 
             // Apply buffered world state (snapshot first, then live messages, in arrival order).
             List<DataDictionary> pending = new List<DataDictionary>(_pendingWorldMessages);
