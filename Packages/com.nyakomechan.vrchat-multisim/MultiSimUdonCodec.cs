@@ -24,6 +24,9 @@ namespace MultiSim
     /// </summary>
     internal class MultiSimUdonCodec : IClientSimEncodeDecoder
     {
+        internal static readonly System.Collections.Generic.List<UdonBehaviour> DeferredDeserializations =
+            new System.Collections.Generic.List<UdonBehaviour>();
+
         public void PreEncode(MonoBehaviour component)
         {
             ((UdonBehaviour)component).OnPreSerialization();
@@ -128,9 +131,10 @@ namespace MultiSim
 
             if (!udonBehaviour.HasDoneStart)
             {
-                MultiSimLog.Warn($"Skipping OnDeserialization for '{udonBehaviour.gameObject.name}' " +
-                                 $"(HasDoneStart=false). Data was written to the heap but the event will " +
-                                 $"not fire until the next sync.");
+                if (!DeferredDeserializations.Contains(udonBehaviour))
+                {
+                    DeferredDeserializations.Add(udonBehaviour);
+                }
                 return;
             }
 

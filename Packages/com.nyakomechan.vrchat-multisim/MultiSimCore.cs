@@ -11,6 +11,7 @@ using VRC.SDK3.Data;
 using VRC.SDK3.UdonNetworkCalling;
 using VRC.SDKBase;
 using VRC.Udon;
+using VRC.Udon.Common;
 using VRC.Udon.Common.Interfaces;
 
 namespace MultiSim
@@ -106,6 +107,7 @@ namespace MultiSim
             _forcedSettings = null;
             // Clear any stale override (matters when domain reload is disabled).
             MultiSimReflect.SetClientSimSettingsInstance(null);
+            MultiSimUdonCodec.DeferredDeserializations.Clear();
 
             if (!MultiSimPrefs.Enabled)
             {
@@ -237,7 +239,7 @@ namespace MultiSim
                 else
                 {
                     MultiSimLog.Warn("Falling back to single-player ClientSim.");
-                    StartCoroutine(ReadySequence());
+                    StartCoroutine(StandaloneStartup());
                 }
             }
             else
@@ -279,12 +281,19 @@ namespace MultiSim
             _forcedSettings = null;
         }
 
+        private IEnumerator StandaloneStartup()
+        {
+            yield return StartCoroutine(ReadySequence());
+            _ready = true;
+        }
+
         private IEnumerator HostStartup()
         {
             // Give ClientSim's own Start() a frame to run first.
             yield return null;
             _registry.BuildFromScene();
             yield return StartCoroutine(ReadySequence());
+            _ready = true;
 
             // Handle clients that connected while we were getting ready.
             foreach ((int connId, DataDictionary envelope) in _pendingHellos)
@@ -310,6 +319,7 @@ namespace MultiSim
                 MultiSimLog.Warn("Could not join a host in time - falling back to single-player ClientSim.");
                 _sessionActive = false;
                 yield return StartCoroutine(ReadySequence());
+                _ready = true;
             }
         }
 
@@ -344,7 +354,6 @@ namespace MultiSim
 
             VRCPlayerApi local = _playerManager.LocalPlayer();
             _localPlayerId = local != null ? local.playerId : 1;
-            _ready = true;
 
             MultiSimLog.Info($"Ready. Role: {(_isHost ? "HOST" : "CLIENT")}, local player id: {_localPlayerId}" +
                              (_sessionActive ? "" : " (single-player fallback)"));
@@ -404,6 +413,24 @@ namespace MultiSim
             }
 
             PinSeatedRemotePlayers();
+
+            if (MultiSimUdonCodec.DeferredDeserializations.Count > 0)
+            {
+                for (int i = MultiSimUdonCodec.DeferredDeserializations.Count - 1; i >= 0; i--)
+                {
+                    UdonBehaviour ub = MultiSimUdonCodec.DeferredDeserializations[i];
+                    if (ub == null)
+                    {
+                        MultiSimUdonCodec.DeferredDeserializations.RemoveAt(i);
+                        continue;
+                    }
+                    if (ub.HasDoneStart)
+                    {
+                        MultiSimUdonCodec.DeferredDeserializations.RemoveAt(i);
+                        ub.OnDeserialization(new DeserializationResult(0, 0, true));
+                    }
+                }
+            }
 
             // Snapshot the queue into a separate list and clear it before processing,
             // so that re-entrant RequestSerialization calls during PostEncode
@@ -764,10 +791,9 @@ namespace MultiSim
         {
             yield return StartCoroutine(ReadySequence());
 
-            // OnClientSimReady yields one frame for ManagedUpdate to run _start on
-            // UdonBehaviours. Yield another frame to cover late-registered behaviours
-            // (e.g. objects activated during _start) so HasDoneStart is true before
-            // we fire OnDeserialization via the snapshot.
+            // _ready stays false until after the drain so that live messages arriving
+            // during the yield continue to be buffered, preserving TCP arrival order
+            // (snapshot first, then live messages).
             yield return null;
 
             // Apply buffered world state (snapshot first, then live messages, in arrival order).
@@ -777,6 +803,8 @@ namespace MultiSim
             {
                 ApplyWorldMessage(envelope);
             }
+
+            _ready = true;
         }
 
         #endregion
@@ -1265,6 +1293,10 @@ namespace MultiSim
 
             foreach (UdonBehaviour behaviour in seat.StationObject.GetComponents<UdonBehaviour>())
             {
+                if (!behaviour.HasDoneStart)
+                {
+                    continue;
+                }
                 try
                 {
                     // Parameter name gets mangled to the Udon convention, matching
