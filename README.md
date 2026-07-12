@@ -80,6 +80,8 @@ UdonSharp のテストギミックが Assets 配下に取り込まれます。
 - Station 同期は「VRCStation がネットワークコンポーネント(UdonBehaviour 等)と同じ GameObject にある」ことが前提です(NetworkID でStationを特定するため)。着席ポーズは再現されず、リモートプレイヤーは着席位置に立ち姿で固定されます。
 - ホストが自分のインスタンスオーナーになります。`isInstanceOwner` はホストのみ true です。
 - ポートは `Tools/VRChat MultiSim` の設定(既定 24685)。他ツールと衝突する場合は `MultiSimPrefs` の EditorPrefs キー `MultiSim.Port` を変更してください。
+- ポートは `Tools/VRChat MultiSim` の設定(既定 24685)。他ツールと衝突する場合は `MultiSimPrefs` の EditorPrefs キー `MultiSim.Port` を変更してください。
+- Network ID Import and Export Utility で Regenerate Scene IDs を行った場合は、クローンプロジェクトの Unity Editor でも同様に Regenerate Scene IDs をしてください。
 
 ## ファイル構成
 
@@ -103,7 +105,7 @@ Packages/com.nyakomechan.vrchat-multisim/
 ## LICENSE
 MIT License
 
-Copyright (c) nyakomechan
+Copyright (c) nyakome
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
