@@ -1,6 +1,7 @@
 # VRChat MultiSim
+ClientSim に Local TCP通信機能を付加し、 Unity Editor 上で VRChat ワールドのマルチプレイヤーでの動作確認を行うツールです。
 
-[ParrelSync](https://github.com/VeriorPies/ParrelSync/) でクローンした複数の Unity Editor を localhost TCP で接続し、**ビルドせずに Editor 上で VRChat ワールドのマルチプレイ動作確認**を行うツールです。VRChat ClientSim に NetCode 的な通信レイヤーを追加するイメージで動作します。
+[ParrelSync](https://github.com/VeriorPies/ParrelSync/) を用いて複製したプレイヤー人数分の Unity Editor にて、通常のClientSimと同じ感覚でマルチプレイヤーでの動作確認を行えます。
 
 ## 仕組み
 
