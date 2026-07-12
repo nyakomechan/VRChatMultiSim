@@ -3,6 +3,7 @@
     "rootNamespace": "MultiSim",
     "references": [
         "VRC.ClientSim",
+        "VRC.ClientSim.Editor",
         "VRC.Udon",
         "VRC.SDKBase",
         "ParrelSync"
