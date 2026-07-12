@@ -219,6 +219,8 @@ namespace MultiSim
             // ClientSim's own UdonBehaviour codec corrupts UdonSharp heap slots (see MultiSimUdonCodec).
             _originalUdonCodec = MultiSimReflect.SwapEncodeDecoder(typeof(UdonBehaviour), new MultiSimUdonCodec());
             _udonCodecSwapped = true;
+            // The matching inspector renderer (ClientSim's assumes the original codec format).
+            MultiSimUdonCodecEditor.TryRegister();
 
             InstallHooks();
 
@@ -295,6 +297,11 @@ namespace MultiSim
             yield return StartCoroutine(ReadySequence());
             _ready = true;
 
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+            // The host's own VRCPlayerObject copies (id 1, already correct).
+            RegisterPlayerObjects(_playerManager.LocalPlayer());
+#endif
+
             // Handle clients that connected while we were getting ready.
             foreach ((int connId, DataDictionary envelope) in _pendingHellos)
             {
@@ -344,6 +351,28 @@ namespace MultiSim
             }
 
             MultiSimReflect.SetMainReady(_main);
+
+            // Runtime-instantiated VRCPlayerObject copies (created when players spawn
+            // before this sequence, e.g. remotes from the welcome message) carry a
+            // cloned ClientSimUdonHelper whose non-serialized _udonBehaviour is null.
+            // Its own Start() would destroy it, but OnClientSimReady can iterate it
+            // first and throw. Sweep uninitialized helpers here, mirroring
+            // ClientSimUdonHelper.Start's cleanup.
+            // Resources.FindObjectsOfTypeAll, not FindObjectsByType: these helpers carry
+            // HideFlags.DontSave, which FindObjectsByType silently excludes.
+            foreach (ClientSimUdonHelper helper in Resources.FindObjectsOfTypeAll<ClientSimUdonHelper>())
+            {
+                if (EditorUtility.IsPersistent(helper))
+                {
+                    continue;
+                }
+                if (helper.GetUdonBehaviour() == null)
+                {
+                    MultiSimLog.Verbose($"Destroying stale uninitialized ClientSimUdonHelper on " +
+                                        $"'{helper.gameObject.name}'.");
+                    DestroyImmediate(helper);
+                }
+            }
 
             ClientSimUdonManager udonManager = MultiSimReflect.GetUdonManager(_main);
             yield return StartCoroutine(udonManager.OnClientSimReady());
@@ -754,8 +783,16 @@ namespace MultiSim
 
             // Remap the local player (currently id 1) to the assigned id.
             VRCPlayerApi local = _playerManager.LocalPlayer();
+            int previousId = local.playerId;
             MultiSimReflect.RemapPlayerId(_playerManager, local, myId);
             _localPlayerId = myId;
+
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+            // The local player's VRCPlayerObject copies were instantiated with the
+            // pre-remap id; renumber them before remote spawns can claim id 1's range.
+            RenumberLocalPlayerObjects(local, previousId, myId);
+            RegisterPlayerObjects(local);
+#endif
 
             // Spawn remote players for everyone already in the session, in join order.
             _joinOrder.Clear();
@@ -827,7 +864,82 @@ namespace MultiSim
 
             MultiSimReflect.SetCachedPlayerId(api, playerId);
             MultiSimReflect.SetNextPlayerId(_playerManager, Mathf.Max(previousNext, playerId + 1));
+
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+            // ClientSim instantiated this player's VRCPlayerObject copies with the
+            // correct id (we forced it above); make them addressable for sync.
+            RegisterPlayerObjects(api);
+#endif
         }
+
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+        /// <summary>
+        /// ClientSim instantiates the local player's VRCPlayerObject copies before the
+        /// session id is known (default id 1). After the welcome remap, rename the copies
+        /// and shift their network ids and owners into the assigned id's range so they
+        /// match what every other instance computes for this player.
+        /// </summary>
+        private void RenumberLocalPlayerObjects(VRCPlayerApi local, int previousId, int newId)
+        {
+            if (previousId == newId)
+            {
+                return;
+            }
+
+            ClientSimPlayer clientSimPlayer = local.GetClientSimPlayer();
+            if (clientSimPlayer == null)
+            {
+                return;
+            }
+
+            int idShift = (newId - previousId) * ClientSimNetworkingUtilities.MaxID;
+            string oldSuffix = $" [{previousId}]";
+            foreach (GameObject root in clientSimPlayer.PlayerPersistenceRootObjects)
+            {
+                if (root == null)
+                {
+                    continue;
+                }
+
+                if (root.name.EndsWith(oldSuffix, StringComparison.Ordinal))
+                {
+                    root.name = root.name.Substring(0, root.name.Length - oldSuffix.Length) + $" [{newId}]";
+                }
+
+                foreach (ClientSimNetworkingView view in root.GetComponentsInChildren<ClientSimNetworkingView>(true))
+                {
+                    int networkId = view.GetNetworkId();
+                    if (networkId > 0)
+                    {
+                        view.SetNetworkId(networkId + idShift);
+                    }
+                    view.SetPlayerId(newId);
+                }
+
+                foreach (IClientSimSyncable syncable in root.GetComponentsInChildren<IClientSimSyncable>(true))
+                {
+                    if (syncable.GetOwner() == previousId)
+                    {
+                        syncable.SetOwner(newId);
+                    }
+                }
+            }
+        }
+
+        private void RegisterPlayerObjects(VRCPlayerApi player)
+        {
+            ClientSimPlayer clientSimPlayer = player?.GetClientSimPlayer();
+            if (clientSimPlayer == null)
+            {
+                return;
+            }
+
+            foreach (GameObject root in clientSimPlayer.PlayerPersistenceRootObjects)
+            {
+                _registry.RegisterRuntimeHierarchy(root);
+            }
+        }
+#endif
 
         private void HandlePlayerJoin(DataDictionary payload)
         {
@@ -1524,6 +1636,10 @@ namespace MultiSim
             UdonBehaviour.RequestSerializationHook += OnRequestSerialization;
             Networking._SetOwner += OnSetOwnerCalled;
             VRCPlayerApi._TakeOwnership += OnSetOwnerCalled;
+            // ClientSim's GetUniqueName returns GetInstanceID(), which differs per editor
+            // process and breaks cross-instance identity (e.g. QvPen derives pen ids from
+            // it). Registering after ClientSim makes this multicast handler's return win.
+            Networking._GetUniqueName += GetDeterministicUniqueName;
 
             MethodInfo handler = typeof(MultiSimCore).GetMethod(
                 nameof(OnSendCustomNetworkEvent), BindingFlags.Static | BindingFlags.NonPublic);
@@ -1542,9 +1658,32 @@ namespace MultiSim
             UdonBehaviour.RequestSerializationHook -= OnRequestSerialization;
             Networking._SetOwner -= OnSetOwnerCalled;
             VRCPlayerApi._TakeOwnership -= OnSetOwnerCalled;
+            Networking._GetUniqueName -= GetDeterministicUniqueName;
             MultiSimReflect.RemoveSendCustomNetworkEventHandler(_sendEventHandler);
             _sendEventHandler = null;
             _hooksInstalled = false;
+        }
+
+        /// <summary>
+        /// Cross-instance stable replacement for GetUniqueName. Uses the full hierarchy
+        /// path with sibling indices, which is identical in both editors for scene
+        /// objects (the scenes are clones of each other).
+        /// </summary>
+        private static string GetDeterministicUniqueName(GameObject obj)
+        {
+            if (obj == null)
+            {
+                return string.Empty;
+            }
+
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            Transform t = obj.transform;
+            while (t != null)
+            {
+                sb.Insert(0, $"/{t.GetSiblingIndex()}:{t.name}");
+                t = t.parent;
+            }
+            return sb.ToString();
         }
 
         private void OnRequestSerialization(UdonBehaviour udonBehaviour)
