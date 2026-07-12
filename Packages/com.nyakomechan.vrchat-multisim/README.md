@@ -1,12 +1,20 @@
 # VRChat MultiSim
 
-[ParrelSync](https://github.com/VeriorPies/ParrelSync/) でクローンした複数の Unity Editor を localhost TCP で接続し、**ビルドせずに Editor 上で VRChat ワールドのマルチプレイ動作確認**を行うツールです。VRChat ClientSim に NetCode 的な通信レイヤーを追加するイメージで動作します。
+**ワールドをビルド・アップロードせずに、Unity Editor 上だけで同期ギミックのマルチプレイ動作確認ができるツール**です。
 
-## 仕組み
+VRChat ワールドの同期ギミック(同期変数、ネットワークイベント、Ownership、ピックアップ、Station など)を作っていて、こんな経験はありませんか?
 
-- **ParrelSync のオリジナルプロジェクト = ホスト**(プレイヤーID 1、マスター)、**クローン = クライアント**として自動判別されます。
-- ClientSim は通常どおり起動しますが、Ready 化(Udon の開始と `OnPlayerJoined` の配信)をハンドシェイク完了まで保留します。これにより **全インスタンスでプレイヤーID・マスターが一致した状態で Udon が動き始めます**。
-- 同期処理は ClientSim 同梱のシリアライズ基盤(`ClientSimNetworkIdHolder` / NetworkID)をそのまま利用します。NetworkID はシーンの Transform パス順に決定的に割り当てられるため、クローン間で必ず一致します。
+- 動作確認のたびにビルド → アップロード → VRChat 起動 → 2アカウント or 2台で入り直し…と数分〜数十分かかる
+- ClientSim(Play ボタンでのテスト)は 1 人プレイなので、「他のプレイヤーから見てどう動くか」「レイトジョイナーに状態が引き継がれるか」が確認できない
+- 「自分の環境では動いたのに、フレンドと入ったら同期がズレていた」
+
+MultiSim を入れると、[ParrelSync](https://github.com/VeriorPies/ParrelSync/) で複製した 2 つ(以上)の Unity Editor がお互いに通信し、**それぞれが別のプレイヤーとして同じワールドに入った状態**になります。片方の Editor でボタンを押せば、もう片方の Editor でも同期変数が更新され、`OnDeserialization` やネットワークイベントが発火します。コードを直したら Play し直すだけ。ビルドもアップロードも不要です。
+
+## 仕組み(ざっくり)
+
+- ParrelSync の**オリジナルプロジェクトがホスト**(プレイヤーID 1、マスター)、**クローンがクライアント**として自動で判別されます。設定の使い分けは不要です。
+- 中身は VRChat SDK 同梱の ClientSim をそのまま使い、そこに Editor 間の通信レイヤー(localhost TCP)を追加しています。Udon の開始タイミングを全 Editor で揃えるため、接続が完了してから `OnPlayerJoined` などが配信されます。
+- どのオブジェクトがどれと同期するかは、VRChat 本番と同じ NetworkID の仕組みで対応付けているため、シーンが同じであれば Editor 間で必ず一致します。
 
 ## 同期されるもの
 
