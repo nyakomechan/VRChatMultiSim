@@ -85,6 +85,7 @@ UdonSharp のテストギミックが Assets 配下に取り込まれます。
 - ポートは `Tools/VRChat MultiSim` の設定(既定 24685)。他ツールと衝突する場合は `MultiSimPrefs` の EditorPrefs キー `MultiSim.Port` を変更してください。
 - ポートは `Tools/VRChat MultiSim` の設定(既定 24685)。他ツールと衝突する場合は `MultiSimPrefs` の EditorPrefs キー `MultiSim.Port` を変更してください。
 - Network ID Import and Export Utility で Regenerate Scene IDs を行った場合は、クローンプロジェクトの Unity Editor でも同様に Regenerate Scene IDs をしてください。
+- ParrelSyncの仕様上Packagesフォルダの変更はクローンには反映されないため、VPM/UPM Pakcageを導入した際はクローンを作成し直してください。
 
 ## ファイル構成
 
