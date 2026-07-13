@@ -1,7 +1,7 @@
 {
   "name": "com.nyakomechan.vrchat-multisim",
   "displayName": "VRChat MultiSim",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "unity": "2022.3",
   "description": "In-editor multiplayer simulation for VRChat worlds.",
   "author": {
