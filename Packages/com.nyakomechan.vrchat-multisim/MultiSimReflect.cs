@@ -5,6 +5,9 @@ using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 using VRC.SDK3.ClientSim;
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+using VRC.SDK3.ClientSim.Persistence;
+#endif
 using VRC.SDKBase;
 using VRC.Udon;
 using VRC.Udon.Common.Interfaces;
@@ -129,8 +132,42 @@ namespace MultiSim
             // Optional: only used to mark stations as occupied by remote players.
             _stationUsingPlayerField = typeof(ClientSimStationHelper).GetField("_usingPlayer", AnyInstance);
 
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+            _playerDataObjectField = Require(
+                playerType.GetField("PlayerDataObject", AnyInstance), "ClientSimPlayer.PlayerDataObject");
+            Type storageType = typeof(ClientSimPlayerDataStorage);
+            _pdFlushLocalInfoChangesMethod = Require(
+                storageType.GetMethod("FlushLocalInfoChanges", AnyInstance),
+                "ClientSimPlayerDataStorage.FlushLocalInfoChanges");
+            _pdLeDataField = Require(
+                storageType.GetField("leData", AnyInstance), "ClientSimPlayerDataStorage.leData");
+#endif
+
             _initialized = true;
         }
+
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+        private static FieldInfo _playerDataObjectField;
+        private static MethodInfo _pdFlushLocalInfoChangesMethod;
+        private static FieldInfo _pdLeDataField;
+
+        public static ClientSimPlayerDataStorage GetPlayerDataStorage(ClientSimPlayer player)
+        {
+            return (ClientSimPlayerDataStorage)_playerDataObjectField.GetValue(player);
+        }
+
+        /// <summary>Queues an OnPlayerDataUpdated commit for changes staged with flushChanges:false.</summary>
+        public static void FlushPlayerDataChanges(ClientSimPlayerDataStorage storage)
+        {
+            _pdFlushLocalInfoChangesMethod.Invoke(storage, null);
+        }
+
+        public static System.Collections.Generic.Dictionary<string, ClientSimPlayerDataPair> GetPlayerDataDictionary(
+            ClientSimPlayerDataStorage storage)
+        {
+            return (System.Collections.Generic.Dictionary<string, ClientSimPlayerDataPair>)_pdLeDataField.GetValue(storage);
+        }
+#endif
 
         private static T Require<T>(T member, string description) where T : MemberInfo
         {
