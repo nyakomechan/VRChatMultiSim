@@ -6,6 +6,9 @@ using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 using VRC.SDK3.ClientSim;
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+using VRC.SDK3.ClientSim.Persistence;
+#endif
 using VRC.SDK3.ClientSim.Interfaces;
 using VRC.SDK3.Data;
 using VRC.SDK3.UdonNetworkCalling;
@@ -228,6 +231,9 @@ namespace MultiSim
             _dispatcher = MultiSimReflect.GetEventDispatcher(_main);
             _dispatcher.Subscribe<ClientSimOnPlayerEnteredStationEvent>(OnLocalPlayerEnteredStation);
             _dispatcher.Subscribe<ClientSimOnPlayerExitedStationEvent>(OnLocalPlayerExitedStation);
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+            _dispatcher.Subscribe<ClientSimOnPlayerDataUpdatedEvent>(OnPlayerDataUpdated);
+#endif
 
             _transport = new MultiSimTransport();
             if (_isHost)
@@ -266,6 +272,9 @@ namespace MultiSim
                 {
                     _dispatcher.Unsubscribe<ClientSimOnPlayerEnteredStationEvent>(OnLocalPlayerEnteredStation);
                     _dispatcher.Unsubscribe<ClientSimOnPlayerExitedStationEvent>(OnLocalPlayerExitedStation);
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+                    _dispatcher.Unsubscribe<ClientSimOnPlayerDataUpdatedEvent>(OnPlayerDataUpdated);
+#endif
                 }
                 catch (Exception)
                 {
@@ -419,6 +428,13 @@ namespace MultiSim
             {
                 return;
             }
+
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+            if (_pendingPlayerDataBroadcast)
+            {
+                SendLocalPlayerData();
+            }
+#endif
 
             float now = Time.unscaledTime;
             if (now >= _nextContinuousSync)
@@ -636,6 +652,11 @@ namespace MultiSim
                 case "unsit":
                     ApplyUnseat(senderId, fireEvents: true, warpToExit: true);
                     break;
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+                case "pdata":
+                    ApplyPlayerData((int)payload["pid"].Double, payload["json"].String);
+                    break;
+#endif
                 default:
                     MultiSimLog.Verbose($"Ignoring unknown message type '{type}'.");
                     break;
@@ -759,6 +780,31 @@ namespace MultiSim
                 seats.Add(entry);
             }
             snapshot["seats"] = seats;
+
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+            // PlayerData per player. The host's stores aggregate what every editor
+            // broadcast, so a late joiner gets the full picture from here.
+            DataList playerData = new DataList();
+            foreach (VRCPlayerApi api in VRCPlayerApi.AllPlayers)
+            {
+                if (!MultiSimPlayerData.TryGetStorage(api, out ClientSimPlayerDataStorage storage))
+                {
+                    continue;
+                }
+
+                string json = MultiSimPlayerData.Serialize(storage);
+                if (string.IsNullOrEmpty(json) || json == "{}")
+                {
+                    continue;
+                }
+
+                DataDictionary entry = new DataDictionary();
+                entry["pid"] = api.playerId;
+                entry["json"] = json;
+                playerData.Add(entry);
+            }
+            snapshot["pdata"] = playerData;
+#endif
 
             return snapshot;
         }
@@ -1110,6 +1156,19 @@ namespace MultiSim
 
         private void HandleSnapshot(DataDictionary payload)
         {
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+            if (payload.TryGetValue("pdata", out DataToken playerDataToken) &&
+                playerDataToken.TokenType == TokenType.DataList)
+            {
+                DataList playerData = playerDataToken.DataList;
+                for (int i = 0; i < playerData.Count; i++)
+                {
+                    DataDictionary entry = playerData[i].DataDictionary;
+                    ApplyPlayerData((int)entry["pid"].Double, entry["json"].String);
+                }
+            }
+#endif
+
             if (payload.TryGetValue("seats", out DataToken seatsToken) &&
                 seatsToken.TokenType == TokenType.DataList)
             {
@@ -1152,6 +1211,67 @@ namespace MultiSim
 
             MultiSimLog.Verbose($"Applied snapshot for {applied} object(s).");
         }
+
+        #endregion
+
+        #region PlayerData sync
+
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+        private bool _pendingPlayerDataBroadcast;
+
+        // Fired by ClientSim's dispatcher whenever a storage commits changes (including
+        // our own injections into remote stores, which the isLocal check filters out).
+        private void OnPlayerDataUpdated(ClientSimOnPlayerDataUpdatedEvent updateEvent)
+        {
+            if (updateEvent.player == null || !updateEvent.player.isLocal || !_sessionActive)
+            {
+                return;
+            }
+
+            if (!_ready)
+            {
+                // The initial restore decode can commit before the join finishes;
+                // Update() flushes this once the session is ready.
+                _pendingPlayerDataBroadcast = true;
+                return;
+            }
+
+            SendLocalPlayerData();
+        }
+
+        private void SendLocalPlayerData()
+        {
+            _pendingPlayerDataBroadcast = false;
+            VRCPlayerApi local = _playerManager.LocalPlayer();
+            if (!MultiSimPlayerData.TryGetStorage(local, out ClientSimPlayerDataStorage storage))
+            {
+                return;
+            }
+
+            DataDictionary payload = new DataDictionary();
+            payload["pid"] = _localPlayerId;
+            payload["json"] = MultiSimPlayerData.Serialize(storage);
+            SendEnvelope("pdata", payload);
+        }
+
+        private void ApplyPlayerData(int playerId, string json)
+        {
+            if (playerId == _localPlayerId)
+            {
+                // We are authoritative for our own data.
+                return;
+            }
+
+            VRCPlayerApi api = _playerManager.GetPlayerByID(playerId);
+            if (api == null || !MultiSimPlayerData.TryGetStorage(api, out ClientSimPlayerDataStorage storage))
+            {
+                MultiSimLog.Verbose($"PlayerData for unknown player {playerId}.");
+                return;
+            }
+
+            MultiSimPlayerData.Inject(storage, json);
+        }
+#endif
 
         #endregion
 
