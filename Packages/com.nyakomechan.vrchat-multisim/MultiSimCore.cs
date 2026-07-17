@@ -265,6 +265,11 @@ namespace MultiSim
                 _instance = null;
             }
 
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+            // Adopt this session's persistence saves as the editor's stable files.
+            MultiSimPersistence.SaveBack(_localPlayerId);
+#endif
+
             RemoveHooks();
             if (_dispatcher != null)
             {
@@ -294,6 +299,9 @@ namespace MultiSim
 
         private IEnumerator StandaloneStartup()
         {
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+            MultiSimPersistence.StageForSession(1);
+#endif
             yield return StartCoroutine(ReadySequence());
             _ready = true;
         }
@@ -303,6 +311,10 @@ namespace MultiSim
             // Give ClientSim's own Start() a frame to run first.
             yield return null;
             _registry.BuildFromScene();
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+            // Before ReadySequence dispatches the local join (= restore decode).
+            MultiSimPersistence.StageForSession(1);
+#endif
             yield return StartCoroutine(ReadySequence());
             _ready = true;
 
@@ -334,6 +346,9 @@ namespace MultiSim
             {
                 MultiSimLog.Warn("Could not join a host in time - falling back to single-player ClientSim.");
                 _sessionActive = false;
+#if VRC_ENABLE_PLAYER_PERSISTENCE
+                MultiSimPersistence.StageForSession(1);
+#endif
                 yield return StartCoroutine(ReadySequence());
                 _ready = true;
             }
@@ -838,6 +853,8 @@ namespace MultiSim
             // pre-remap id; renumber them before remote spawns can claim id 1's range.
             RenumberLocalPlayerObjects(local, previousId, myId);
             RegisterPlayerObjects(local);
+            // Before the join dispatch triggers ClientSim's restore decode.
+            MultiSimPersistence.StageForSession(myId);
 #endif
 
             // Spawn remote players for everyone already in the session, in join order.
